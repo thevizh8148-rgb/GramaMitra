@@ -1,0 +1,6 @@
+{
+  "name": "GramaMitra — Tamil Voice-First Government Scheme Assistant",
+  "description": "Tamil voice-first e-Governance assistant helping rural citizens in Tamil Nadu discover eligible government schemes, prepare document checklists, locate e-Seva centres, and track renewal deadlines.",
+  "requestFramePermissions": ["microphone"],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

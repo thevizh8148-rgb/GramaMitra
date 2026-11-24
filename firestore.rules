@@ -1,0 +1,131 @@
+rules_version = '2';
+
+service cloud.firestore {
+  match /databases/{database}/documents {
+    // Global default deny
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() >= 1 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null && request.auth.token.email_verified == true;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isValidUserProfile(data, userId) {
+      return data.keys().hasAll(['uid', 'fullName', 'email', 'role', 'createdAt', 'updatedAt']) &&
+        data.keys().hasOnly(['uid', 'fullName', 'email', 'phone', 'district', 'role', 'createdAt', 'updatedAt']) &&
+        data.uid is string && data.uid == userId && isValidId(data.uid) &&
+        data.fullName is string && data.fullName.size() >= 1 && data.fullName.size() <= 100 &&
+        data.email is string && data.email.size() >= 3 && data.email.size() <= 150 &&
+        data.role == 'citizen' &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp &&
+        (!('phone' in data) || (data.phone is string && (data.phone.size() == 0 || (data.phone.size() == 10 && data.phone.matches('^[6-9][0-9]{9}$'))))) &&
+        (!('district' in data) || (data.district is string && data.district.size() <= 60));
+    }
+
+    function isValidCustomerRecord(data, userId, customerId) {
+      return data.keys().hasAll([
+          'id', 'ownerId', 'fullName', 'phone', 'age', 'gender', 'occupation',
+          'annualIncome', 'hasLand', 'landAcres', 'district', 'village',
+          'eligibleSchemeCount', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.keys().hasOnly([
+          'id', 'ownerId', 'fullName', 'phone', 'age', 'gender', 'occupation',
+          'annualIncome', 'hasLand', 'landAcres', 'district', 'village',
+          'notes', 'eligibleSchemeCount', 'status', 'createdAt', 'updatedAt'
+        ]) &&
+        data.id is string && data.id == customerId && isValidId(data.id) &&
+        data.ownerId is string && data.ownerId == userId &&
+        data.fullName is string && data.fullName.size() >= 2 && data.fullName.size() <= 100 &&
+        data.phone is string && data.phone.size() == 10 && data.phone.matches('^[6-9][0-9]{9}$') &&
+        data.age is number && data.age >= 1 && data.age <= 120 &&
+        data.gender is string && data.gender in ['male', 'female', 'other'] &&
+        data.occupation is string && data.occupation in ['farmer', 'elderly', 'student', 'shopkeeper', 'homemaker', 'artisan', 'fisher', 'worker'] &&
+        data.annualIncome is number && data.annualIncome >= 0 && data.annualIncome <= 10000000 &&
+        data.hasLand is bool &&
+        data.landAcres is number && data.landAcres >= 0 && data.landAcres <= 500 &&
+        data.district is string && data.district.size() >= 2 && data.district.size() <= 60 &&
+        data.village is string && data.village.size() >= 1 && data.village.size() <= 80 &&
+        (!('notes' in data) || (data.notes is string && data.notes.size() <= 400)) &&
+        data.eligibleSchemeCount is number && data.eligibleSchemeCount >= 0 && data.eligibleSchemeCount <= 50 &&
+        data.status is string && data.status in ['active', 'applied', 'completed'] &&
+        data.createdAt is timestamp &&
+        data.updatedAt is timestamp;
+    }
+
+    match /users/{userId} {
+      allow get: if isValidId(userId) && isOwner(userId);
+      allow list: if false;
+
+      allow create: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().createdAt == request.time &&
+        incoming().updatedAt == request.time;
+
+      allow update: if isValidId(userId) &&
+        isOwner(userId) &&
+        isValidUserProfile(incoming(), userId) &&
+        incoming().uid == existing().uid &&
+        incoming().createdAt == existing().createdAt &&
+        incoming().updatedAt == request.time &&
+        incoming().role == existing().role &&
+        incoming().diff(existing()).affectedKeys().hasOnly(['fullName', 'phone', 'district', 'updatedAt']);
+
+      allow delete: if false;
+
+      match /customers/{customerId} {
+        allow get: if isValidId(userId) && isValidId(customerId) && isOwner(userId);
+        allow list: if isValidId(userId) && isOwner(userId) && resource.data.ownerId == request.auth.uid;
+
+        allow create: if isValidId(userId) &&
+          isValidId(customerId) &&
+          isOwner(userId) &&
+          isValidCustomerRecord(incoming(), userId, customerId) &&
+          incoming().createdAt == request.time &&
+          incoming().updatedAt == request.time &&
+          exists(/databases/$(database)/documents/users/$(userId));
+
+        allow update: if isValidId(userId) &&
+          isValidId(customerId) &&
+          isOwner(userId) &&
+          isValidCustomerRecord(incoming(), userId, customerId) &&
+          existing().status != 'completed' &&
+          incoming().id == existing().id &&
+          incoming().ownerId == existing().ownerId &&
+          incoming().createdAt == existing().createdAt &&
+          incoming().updatedAt == request.time &&
+          (
+            incoming().diff(existing()).affectedKeys().hasOnly([
+              'fullName', 'phone', 'age', 'gender', 'occupation',
+              'annualIncome', 'hasLand', 'landAcres', 'district', 'village',
+              'notes', 'eligibleSchemeCount', 'updatedAt'
+            ]) ||
+            incoming().diff(existing()).affectedKeys().hasOnly(['status', 'updatedAt'])
+          );
+
+        allow delete: if isValidId(userId) &&
+          isValidId(customerId) &&
+          isOwner(userId) &&
+          exists(/databases/$(database)/documents/users/$(userId));
+      }
+    }
+  }
+}
